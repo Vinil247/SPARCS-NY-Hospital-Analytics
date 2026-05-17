@@ -137,6 +137,7 @@ SELECT DISTINCT
 FROM stg_sparcs_raw
 WHERE "Age Group" IS NOT NULL;
 commit;
+
 -- Clinical
 BEGIN;
 DROP TABLE IF EXISTS dim_clinical CASCADE;
@@ -173,13 +174,10 @@ SELECT
         WHEN "APR Severity of Illness Code" IN ('0','1','2') THEN 'Low-Moderate Severity'
         ELSE 'Unknown'
     END as severity_label,
-
-    -- KEY: Generated ONLY from the Codes (Stable Identifiers)
     MD5(CONCAT(
         COALESCE("APR DRG Code", ''),
         COALESCE("CCSR Diagnosis Code", ''),
         COALESCE("APR Severity of Illness Code", '')
-        -- Removed Descriptions from the Hash!
     )) AS clinical_key
 FROM stg_sparcs_raw
 WHERE "APR DRG Code" IS NOT NULL
@@ -189,6 +187,7 @@ GROUP BY
     "APR Severity of Illness Code";
 
 COMMIT;
+
 -- Payment
 BEGIN;
 DROP TABLE IF EXISTS dim_payment CASCADE;
@@ -249,6 +248,7 @@ SELECT DISTINCT
 FROM stg_sparcs_raw
 WHERE "Type of Admission" IS NOT NULL;
 COMMIT;
+
 -- ============================================================================
 -- FACT TABLE
 -- ============================================================================
@@ -331,7 +331,6 @@ JOIN dim_clinical c
     )) = c.clinical_key
 
 WHERE r."Total Charges" IS NOT NULL AND r."Total Costs" IS NOT NULL;
-
 COMMIT;
 
 -- ============================================================================
@@ -347,7 +346,7 @@ CREATE INDEX idx_fact_costs ON fact_hospital_encounter(total_costs);
 -- VALIDATION
 -- ============================================================================
 
--- Check for duplicates (should return 0 rows)
+-- Check for duplicates
 SELECT 'Check for duplicate business keys:' as check_name;
 
 SELECT 'dim_hospital' as table_name, hospital_key, COUNT(*) 
