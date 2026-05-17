@@ -1,12 +1,5 @@
 -- ============================================================================
--- COMPLETE FIXED VERSION - RUN ALL TOGETHER
--- ============================================================================
-
--- 1. STAGING TABLE (Keep your working version)
--- ============================================================================
--- Your staging table is already loaded - we'll keep it
-
--- 2. DROP AND RECREATE ALL DIMENSIONS WITH PROPER BUSINESS KEYS
+-- STAGING TABLE
 -- ============================================================================
 BEGIN;
 DROP TABLE IF EXISTS stg_sparcs_raw CASCADE;
@@ -58,15 +51,13 @@ UPDATE stg_sparcs_raw
 SET
     "Total Charges" = REPLACE(REPLACE("Total Charges", '$',''), ',', ''),
     "Total Costs" = REPLACE(REPLACE("Total Costs", '$',''), ',', '')
--- The WHERE clause targets rows that contain EITHER the $ OR the ,
 WHERE
     "Total Charges" ILIKE '%$%'
     OR "Total Charges" ILIKE '%,%'
     OR "Total Costs" ILIKE '%$%'
     OR "Total Costs" ILIKE '%,%';
 
--- Step 2: Use a single ALTER TABLE for both columns for efficiency
--- (This assumes the update above handles any remaining non-numeric blanks)
+-- Cast to numeric
 ALTER TABLE stg_sparcs_raw
 ALTER COLUMN "Total Charges" TYPE NUMERIC USING NULLIF("Total Charges", '')::NUMERIC,
 ALTER COLUMN "Total Costs" TYPE NUMERIC USING NULLIF("Total Costs", '')::NUMERIC;
@@ -99,11 +90,7 @@ INSERT INTO dim_hospital (
     hospital_key
 )
 SELECT DISTINCT
-    --"Permanent Facility Id",
-    --"Facility Name", 
-    --"Hospital County",
-    --"Hospital Service Area",
-	COALESCE("Permanent Facility Id", 'Unknown') AS permanent_facility_id,
+COALESCE("Permanent Facility Id", 'Unknown') AS permanent_facility_id,
 	"Facility Name", 
 	COALESCE("Hospital County", 'Unknown') AS hospital_county,
 	COALESCE("Hospital Service Area", 'Unknown') AS hospital_service_area,
@@ -116,9 +103,7 @@ SELECT DISTINCT
 FROM stg_sparcs_raw
 WHERE "Facility Name" IS NOT NULL AND "Facility Name" != '';
 COMMIT;
--- ============================================================================
-
--- Fix dim_patient
+-- Patient
 Begin;
 DROP TABLE IF EXISTS dim_patient CASCADE;
 CREATE TABLE dim_patient (
@@ -139,8 +124,7 @@ SELECT DISTINCT
 		WHEN "Age Group" IN ('50 to 69', '50-69') THEN '50-69'
 		WHEN "Age Group" = '70 or Older' THEN '70+'
 		ELSE "Age Group" 
-	END AS age_group, 
-   -- "Age Group",
+	END AS age_group,
     "Gender",
     "Race",
     "Ethnicity",
@@ -153,9 +137,7 @@ SELECT DISTINCT
 FROM stg_sparcs_raw
 WHERE "Age Group" IS NOT NULL;
 commit;
--- ============================================================================
-
--- Fix dim_clinical
+-- Clinical
 BEGIN;
 DROP TABLE IF EXISTS dim_clinical CASCADE;
 
@@ -207,13 +189,7 @@ GROUP BY
     "APR Severity of Illness Code";
 
 COMMIT;
------
-
-
-
--- ============================================================================
-
--- Fix dim_payment
+-- Payment
 BEGIN;
 DROP TABLE IF EXISTS dim_payment CASCADE;
 CREATE TABLE dim_payment (
@@ -226,13 +202,6 @@ CREATE TABLE dim_payment (
 INSERT INTO dim_payment(payment_typology, payer_category, payment_key)
 SELECT DISTINCT
     "Payment Typology 1",
-    --CASE 
-     --   WHEN "Payment Typology 1" LIKE '%Medicare%' THEN 'Medicare'
-      --  WHEN "Payment Typology 1" LIKE '%Medicaid%' THEN 'Medicaid'
-       -- WHEN "Payment Typology 1" LIKE '%Commercial%' OR "Payment Typology 1" LIKE '%Private%' THEN 'Private'
-       -- WHEN "Payment Typology 1" LIKE '%Self%' THEN 'Self-Pay'
-      --ELSE 'Other'
-    --END,
 	CASE
 	    WHEN "Payment Typology 1" LIKE '%Medicare%' THEN 'Medicare'
 	    WHEN "Payment Typology 1" LIKE '%Medicaid%' THEN 'Medicaid'
@@ -256,9 +225,7 @@ FROM stg_sparcs_raw
 WHERE "Payment Typology 1" IS NOT NULL;
 COMMIT;
 
--- ============================================================================
-
--- Fix dim_admission
+-- Admission
 BEGIN;
 DROP TABLE IF EXISTS dim_admission CASCADE;
 CREATE TABLE dim_admission (
@@ -283,7 +250,7 @@ FROM stg_sparcs_raw
 WHERE "Type of Admission" IS NOT NULL;
 COMMIT;
 -- ============================================================================
--- 3. FIXED FACT TABLE
+-- FACT TABLE
 -- ============================================================================
 BEGIN;
 DROP TABLE IF EXISTS fact_hospital_encounter CASCADE;
@@ -324,7 +291,6 @@ SELECT
         THEN ROUND(r."Total Costs" / CAST(r."Length of Stay" AS INT), 2)
         ELSE NULL
     END,
-   -- r."CCSR Procedure Code" IS NOT NULL AND r."CCSR Procedure Code" <> '',
 	CASE 
     	WHEN r."CCSR Procedure Code" IS NULL 
 		OR r."CCSR Procedure Code" IN ('', 'nan', 'NaN', 'N/A')
@@ -334,7 +300,6 @@ SELECT
     r."Total Charges" IS NOT NULL AND r."Total Costs" IS NOT NULL
 FROM stg_sparcs_raw r
 
--- Standard Dimensions 
 JOIN dim_hospital h 
     ON MD5(CONCAT(
 		COALESCE(r."Permanent Facility Id", ''), 
@@ -370,7 +335,7 @@ WHERE r."Total Charges" IS NOT NULL AND r."Total Costs" IS NOT NULL;
 COMMIT;
 
 -- ============================================================================
--- 4. CREATE INDEXES
+-- INDEXES
 -- ============================================================================
 
 CREATE INDEX idx_fact_hospital ON fact_hospital_encounter(hospital_id);
@@ -379,7 +344,7 @@ CREATE INDEX idx_fact_year ON fact_hospital_encounter(discharge_year);
 CREATE INDEX idx_fact_costs ON fact_hospital_encounter(total_costs);
 
 -- ============================================================================
--- 5. VALIDATION QUERIES
+-- VALIDATION
 -- ============================================================================
 
 -- Check for duplicates (should return 0 rows)
